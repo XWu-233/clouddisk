@@ -1,0 +1,36 @@
+name: 更新文件索引并部署 Pages
+
+on:
+  release:
+    types: [published, edited, deleted]   # 发布/修改/删除 Release 时触发
+  workflow_dispatch:                      # 允许手动触发
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+
+      - name: 生成索引页面
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: python generate_index.py
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v4
+
+      - name: 上传页面产物
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+      - name: 部署到 GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

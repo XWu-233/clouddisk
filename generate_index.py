@@ -6,7 +6,7 @@ repo = os.environ['GITHUB_REPOSITORY']
 headers = {'Authorization': f'token {token}', 'Accept': 'application/vnd.github+json'}
 api_url = f'https://api.github.com/repos/{repo}/releases?per_page=100'
 
-# 获取所有 Release（处理分页）
+# 获取所有 Release（分页）
 releases = []
 page = 1
 while True:
@@ -19,47 +19,67 @@ while True:
     releases.extend(data)
     page += 1
 
-# 收集文件信息
+# 收集所有附件
 files = []
 for rel in releases:
     for asset in rel.get('assets', []):
         files.append({
-            'path': asset['name'],          # 文件名，可包含 / 模拟目录
+            'path': asset['name'],
             'size': asset['size'],
             'download': asset['browser_download_url'],
             'tag': rel['tag_name']
         })
 
-# 构建文件夹树
+# 构建树：节点可以是 dict（文件夹）或文件信息 dict
 def add_to_tree(tree, parts, info):
     node = tree
-    for part in parts[:-1]:   # 中间部分为文件夹
+    for part in parts[:-1]:
+        # 如果中间节点是文件信息（冲突），跳过
+        if part in node and isinstance(node[part], dict) and 'download' in node[part]:
+            # 这里简单地保留原文件节点，不再继续添加子路径
+            return
         if part not in node:
             node[part] = {}
         node = node[part]
-    node[parts[-1]] = info    # 叶子节点为文件
+    # 最后一部分：直接覆盖（可能是文件信息）
+    node[parts[-1]] = info
 
 tree = {}
 for f in files:
     parts = f['path'].split('/')
     add_to_tree(tree, parts, f)
 
-# 递归生成 HTML
+def is_file_info(node):
+    return isinstance(node, dict) and 'download' in node
+
 def render_tree(node, indent=0):
     if not node:
         return ''
     html = '<ul>\n'
-    # 分离文件夹与文件
-    dirs = {k: v for k, v in node.items() if isinstance(v, dict)}
-    files = {k: v for k, v in node.items() if not isinstance(v, dict)}
+    # 分离：文件夹（不含 download 键）与文件（含 download 键）
+    dirs = {}
+    file_infos = {}
+    for k, v in node.items():
+        if is_file_info(v):
+            file_infos[k] = v
+        elif isinstance(v, dict):
+            dirs[k] = v
+        # 其他非 dict 类型视作文件（一般不会出现）
+        else:
+            file_infos[k] = v
+
     for name in sorted(dirs.keys(), key=str.lower):
         html += f'<li>📁 <strong>{name}</strong>\n'
         html += render_tree(dirs[name], indent+1)
         html += '</li>\n'
-    for name in sorted(files.keys(), key=str.lower):
-        info = files[name]
-        size_mb = info['size'] / (1024*1024)
-        html += f'<li>📄 <a href="{info["download"]}">{name}</a>  ({size_mb:.2f} MB)</li>\n'
+    for name in sorted(file_infos.keys(), key=str.lower):
+        info = file_infos[name]
+        if isinstance(info, dict) and 'download' in info:
+            size_mb = info['size'] / (1024*1024)
+            html += f'<li>📄 <a href="{info["download"]}">{name}</a>  ({size_mb:.2f} MB)</li>\n'
+        else:
+            # 异常情况：展示字符串
+            html += f'<li>📄 {name}: {info}</li>\n'
     html += '</ul>\n'
     return html
 
